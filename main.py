@@ -3,6 +3,9 @@ import requests
 import threading
 import math
 from PyQt5.QtCore import QObject, pyqtSignal
+from flask import Flask, send_from_directory, abort, jsonify, request
+import os
+from threading import Thread
 
 class TileDownloader(QObject):
     TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -128,6 +131,138 @@ class TileDownloader(QObject):
         
         if not self._cancel:
             self.finished.emit()
+    
+    def get_tile_path(self, z, x, y):
+        """Get the filesystem path for a tile"""
+        return os.path.join(self.TILE_FOLDER, str(z), str(x), f"{y}.png")
 
+    def tile_exists(self, z, x, y):
+        """Check if a tile exists locally"""
+        return os.path.exists(self.get_tile_path(z, x, y))
+
+    def get_available_zoom_levels(self):
+        """Get list of zoom levels that have downloaded tiles"""
+        zoom_path = os.path.join(self.TILE_FOLDER)
+        if not os.path.exists(zoom_path):
+            return []
+        
+        return [int(z) for z in os.listdir(zoom_path) if z.isdigit()]
+
+    def get_tile_bounds(self, zoom):
+        """Get the min/max x,y coordinates for a given zoom level"""
+        zoom_path = os.path.join(self.TILE_FOLDER, str(zoom))
+        if not os.path.exists(zoom_path):
+            return None
+        
+        x_folders = [int(x) for x in os.listdir(zoom_path) if x.isdigit()]
+        if not x_folders:
+            return None
+        
+        min_x = min(x_folders)
+        max_x = max(x_folders)
+        
+        y_values = []
+        for x in x_folders:
+            x_path = os.path.join(zoom_path, str(x))
+            y_files = [int(y.split('.')[0]) for y in os.listdir(x_path) if y.endswith('.png')]
+            y_values.extend(y_files)
+        
+        if not y_values:
+            return None
+        
+        return {
+            'min_x': min_x,
+            'max_x': max_x,
+            'min_y': min(y_values),
+            'max_y': max(y_values)
+    }
+
+app = Flask(__name__)
+
+# Initialize your tile downloader
 downloader = TileDownloader()
-downloader.download_all_tiles(43.859968, -79.416525, 1000, 1, 16)
+
+@app.route('/tiles/<int:z>/<int:x>/<int:y>.png')
+def serve_tile(z, x, y):
+    tile_path = os.path.join(downloader.TILE_FOLDER, str(z), str(x), f"{y}.png")
+    
+    if not os.path.exists(tile_path):
+        # Option 1: Return 404 if tile doesn't exist
+        abort(404)
+        
+        # Option 2: Download the tile on demand (slower but more complete)
+        # downloader.download_tile(z, x, y)
+        # if not os.path.exists(tile_path):
+        #     abort(404)
+    
+    return send_from_directory(os.path.dirname(tile_path), f"{y}.png")
+
+@app.route('/preload', methods=['POST'])
+def preload_tiles():
+    """Endpoint to trigger tile preloading"""
+    data = request.json
+    thread = Thread(target=downloader.download_all_tiles,
+                   kwargs={
+                       'center_lat': data['lat'],
+                       'center_lon': data['lon'],
+                       'size_meters': data['size'],
+                       'min_zoom': data['min_zoom'],
+                       'max_zoom': data['max_zoom']
+                   })
+    thread.start()
+    return jsonify({"status": "preloading started"})
+
+@app.route('/status')
+def get_status():
+    """Get download progress status"""
+    return jsonify({
+        "completed": downloader.completed,
+        "total": downloader.total_tiles,
+        "is_active": not downloader._cancel
+    })
+
+@app.route('/cancel', methods=['POST'])
+def cancel_download():
+    """Cancel current download operation"""
+    downloader.cancel()
+    return jsonify({"status": "cancellation requested"})
+
+@app.route('/metadata')
+def get_metadata():
+    """Get metadata about available tiles"""
+    zoom_levels = downloader.get_available_zoom_levels()
+    metadata = {
+        "zoom_levels": zoom_levels,
+        "bounds_per_zoom": {}
+    }
+    
+    for z in zoom_levels:
+        bounds = downloader.get_tile_bounds(z)
+        if bounds:
+            metadata["bounds_per_zoom"][z] = bounds
+    
+    return jsonify(metadata)
+
+@app.route('/tilejson.json')
+def get_tilejson():
+    """Return a TileJSON document for this tileset"""
+    return jsonify({
+        "tilejson": "2.2.0",
+        "name": "Local Tile Cache",
+        "description": "Tiles downloaded from " + downloader.TILE_URL,
+        "version": "1.0.0",
+        "attribution": "Tile data © OpenStreetMap contributors",
+        "scheme": "xyz",
+        "tiles": [
+            f"http://localhost:5000/tiles/{{z}}/{{x}}/{{y}}.png"
+        ],
+        "minzoom": min(downloader.get_available_zoom_levels() or [0]),
+        "maxzoom": max(downloader.get_available_zoom_levels() or [0]),
+        "bounds": [-180, -85, 180, 85]  # Default bounds
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, threaded=True)
+
+    # Access at http://localhost:5000/tiles/{z}/{x}/{y}.png
+    # Example: http://127.0.0.1:5000/tiles/1/0/0.png
