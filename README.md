@@ -11,3 +11,7 @@ This system provides a local tile server that pre-downloads and caches map tiles
 - **Multi-threaded Downloads**: Faster tile fetching
 
 ## Usage
+
+Run `main.py` to start server
+
+Check example folder for client

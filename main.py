@@ -263,6 +263,3 @@ def get_tilejson():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
-
-    # Access at http://localhost:5000/tiles/{z}/{x}/{y}.png
-    # Example: http://127.0.0.1:5000/tiles/1/0/0.png
