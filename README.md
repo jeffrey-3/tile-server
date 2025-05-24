@@ -9,3 +9,5 @@ This system provides a local tile server that pre-downloads and caches map tiles
 - **Progress Tracking**: Monitor download status via API
 - **Folium Integration**: Visualize cached maps in browser
 - **Multi-threaded Downloads**: Faster tile fetching
+
+## Usage
