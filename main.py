@@ -130,4 +130,4 @@ class TileDownloader(QObject):
             self.finished.emit()
 
 downloader = TileDownloader()
-downloader.download_all_tiles()
+downloader.download_all_tiles(43.859968, -79.416525, 1000, 1, 16)
