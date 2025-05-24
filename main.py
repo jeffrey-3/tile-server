@@ -2,19 +2,15 @@ import os
 import requests
 import threading
 import math
-from PyQt5.QtCore import QObject, pyqtSignal
 from flask import Flask, send_from_directory, abort, jsonify, request
 import os
 from threading import Thread
 
-class TileDownloader(QObject):
+class TileDownloader:
     TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     TILE_FOLDER = "tiles"
     THREADS = 20
     EARTH_RADIUS = 6378137  # Earth's radius in meters (WGS84)
-
-    progress_updated = pyqtSignal(int, int)  # current, total
-    finished = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -84,7 +80,6 @@ class TileDownloader(QObject):
             
             with self.progress_lock:
                 self.completed += 1
-                self.progress_updated.emit(self.completed, self.total_tiles)
 
     def calculate_total_tiles(self, min_zoom, max_zoom, center_lat, center_lon, size_meters):
         """Calculate total number of tiles that will be downloaded."""
@@ -128,9 +123,6 @@ class TileDownloader(QObject):
             thread.start()
         for thread in threads:
             thread.join()
-        
-        if not self._cancel:
-            self.finished.emit()
     
     def get_tile_path(self, z, x, y):
         """Get the filesystem path for a tile"""
